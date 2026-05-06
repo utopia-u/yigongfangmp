@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>记账本 Pro</title>
-    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
     <style>
         :root {
             --ios-bg: #F2F2F7;
@@ -119,9 +119,9 @@
             padding: 30px 20px;
             color: var(--ios-text-secondary);
             font-size: 15px;
+            line-height: 1.5;
         }
 
-        /* 全新设计的 Toast 弹窗 */
         #toast {
             position: fixed;
             top: -100px;
@@ -171,46 +171,40 @@
 
         <div class="section-header">月度统计</div>
         <div class="ios-group" id="monthlyList">
-            <div class="empty-state">加载中...</div>
+            <div class="empty-state">连接数据库中...</div>
         </div>
 
         <div class="section-header">历史记录</div>
         <div class="ios-group" id="historyList">
-            <div class="empty-state">加载中...</div>
+            <div class="empty-state">连接数据库中...</div>
         </div>
     </div>
 
     <script>
-        // --- 1. 全局防死锁拦截器 ---
-        // 任何导致代码崩溃的隐性错误，都会直接弹窗显示！
-        window.onerror = function(message, source, lineno, colno, error) {
-            alert('代码发生底层错误:\n' + message + '\n请检查网络或刷新页面');
-            const btn = document.getElementById('submitBtn');
-            if(btn) { btn.disabled = false; btn.innerText = '保存记录'; }
+        // --- 全局防死锁拦截 ---
+        window.onerror = function(message) {
+            console.error("系统错误:", message);
+            showToast('脚本执行出错', 'error');
             return true;
         };
 
-        // --- 2. 数据库配置 ---
+        // --- 数据库配置 ---
         const SUPABASE_URL = 'https://htqjfniugsahibhkjszb.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0cWpmbml1Z3NhaGliaGtqc3piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NDI2NDksImV4cCI6MjA4OTIxODY0OX0.pmMUaaLLZ-RWFt_bkFPFiSLmdM4LKbG6SI-q2TEe-j8';
         
         let supabase = null;
         let localData = []; 
 
-        // --- 3. 核心工具函数 ---
-        // 漂亮的消息提示框
+        // --- 工具函数 ---
         let toastTimeout;
         function showToast(msg, type = 'normal') {
             const toast = document.getElementById('toast');
             toast.innerText = msg;
             toast.className = `show ${type}`;
             clearTimeout(toastTimeout);
-            toastTimeout = setTimeout(() => {
-                toast.className = '';
-            }, 3000);
+            toastTimeout = setTimeout(() => { toast.className = ''; }, 3000);
         }
 
-        // XSS 字符转义
         function escapeHTML(str) {
             if (!str) return '';
             return String(str).replace(/[&<>'"]/g, tag => ({
@@ -218,34 +212,37 @@
             }[tag]));
         }
 
-        // 初始化日期为今天
-        function initDate() {
+        // 核心修复2：无论网络如何，第一秒立刻初始化页面内容
+        function initUI() {
             const now = new Date();
             const year = now.getFullYear();
             const month = String(now.getMonth() + 1).padStart(2, '0');
             const day = String(now.getDate()).padStart(2, '0');
             document.getElementById('dateInput').value = `${year}-${month}-${day}`;
         }
+        initUI(); // 立刻执行！不需要等 window.onload
 
-        // --- 4. 核心业务逻辑 ---
-        
-        // 页面加载完毕后执行
-        window.onload = async () => {
-            initDate();
+        // 核心修复3：轮询等待云端组件加载 (最多等10秒)
+        let checkCount = 0;
+        const initSupabase = setInterval(async () => {
+            checkCount++;
             
-            // 检查 Supabase 库是否被网络拦截
-            if (typeof window.supabase === 'undefined') {
-                showToast('无法连接到数据库服务器(CDN被拦截)', 'error');
-                document.getElementById('historyList').innerHTML = '<div class="empty-state">网络错误，组件未加载</div>';
-                return;
+            // 如果组件加载成功了
+            if (typeof window.supabase !== 'undefined') {
+                clearInterval(initSupabase);
+                supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                await fetchCloudData();
+            } 
+            // 如果等了 10 秒（20次 * 0.5秒）还没加载出来，说明网络彻底墙了
+            else if (checkCount > 20) {
+                clearInterval(initSupabase);
+                showToast('网络连接失败', 'error');
+                document.getElementById('historyList').innerHTML = '<div class="empty-state" style="color:var(--ios-red);">数据库组件加载超时<br>请尝试切换 WiFi、开启代理或刷新页面</div>';
+                document.getElementById('monthlyList').innerHTML = '<div class="empty-state">连接失败</div>';
             }
+        }, 500);
 
-            // 初始化客户端
-            supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-            await fetchCloudData();
-        };
-
-        // 拉取云端数据
+        // --- 业务逻辑 ---
         async function fetchCloudData() {
             try {
                 const { data, error } = await supabase
@@ -259,46 +256,34 @@
                 renderUI();
             } catch (err) {
                 console.error("拉取数据失败:", err);
-                showToast('读取数据失败: ' + err.message, 'error');
-                document.getElementById('historyList').innerHTML = '<div class="empty-state">数据加载失败</div>';
+                document.getElementById('historyList').innerHTML = `<div class="empty-state">拉取失败: ${err.message}</div>`;
             }
         }
 
-        // 表单提交事件 (取代原本的 onclick)
         document.getElementById('expenseForm').addEventListener('submit', async function(e) {
-            e.preventDefault(); // 阻止网页默认的刷新提交行为
+            e.preventDefault(); 
 
             if (!supabase) {
-                showToast('数据库未初始化，无法保存', 'error');
+                showToast('数据库还在连接中，请稍后', 'error');
                 return;
             }
 
-            // 获取数据
             const date = document.getElementById('dateInput').value;
             const amount = parseFloat(document.getElementById('amountInput').value);
             const desc = document.getElementById('descInput').value.trim();
             const btn = document.getElementById('submitBtn');
 
-            // 锁定按钮状态
             btn.disabled = true;
             btn.innerText = '正在保存...';
 
             try {
-                // 写入数据库
-                const { data, error } = await supabase
-                    .from('expenses')
-                    .insert([{ date, amount, desc }])
-                    .select(); // 要求返回刚插入的数据
-
+                const { data, error } = await supabase.from('expenses').insert([{ date, amount, desc }]).select(); 
                 if (error) throw error;
 
-                // 成功后的处理
-                showToast('记录已保存', 'success');
+                showToast('已保存', 'success');
                 document.getElementById('amountInput').value = '';
                 document.getElementById('descInput').value = '';
-                document.getElementById('amountInput').focus(); // 自动聚焦，方便连续记账
-
-                // 刷新列表 (如果有返回值就直接插进去，如果没有就重新拉取)
+                
                 if (data && data.length > 0) {
                     localData.unshift(data[0]); 
                     localData.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
@@ -306,19 +291,16 @@
                 } else {
                     await fetchCloudData();
                 }
-
             } catch (err) {
-                console.error("保存失败:", err);
                 showToast('保存失败: ' + err.message, 'error');
             } finally {
-                // 无论成功还是失败，必须解锁按钮
                 btn.disabled = false;
                 btn.innerText = '保存记录';
             }
         });
 
-        // 删除记录
         window.deleteItem = async function(id) {
+            if (!supabase) return;
             if (!confirm('确定要删除这条记录吗？')) return;
             
             showToast('正在删除...', 'normal');
@@ -330,12 +312,11 @@
                 renderUI();
                 showToast('记录已删除', 'success');
             } catch (err) {
-                console.error("删除失败:", err);
-                showToast('删除失败: ' + err.message, 'error');
+                showToast('删除失败', 'error');
             }
         };
 
-        // --- 5. 页面渲染引擎 ---
+        // --- 渲染引擎 ---
         function renderUI() {
             const historyList = document.getElementById('historyList');
             const monthlyList = document.getElementById('monthlyList');
@@ -352,8 +333,6 @@
 
             localData.forEach(item => {
                 const safeAmount = Number(item.amount) || 0;
-
-                // 渲染单条历史
                 const div = document.createElement('div');
                 div.className = 'list-row';
                 div.innerHTML = `
@@ -368,12 +347,10 @@
                 `;
                 historyList.appendChild(div);
 
-                // 统计月度
                 const m = item.date.substring(0, 7);
                 months[m] = (months[m] || 0) + safeAmount;
             });
 
-            // 渲染月度
             Object.keys(months).sort().reverse().forEach(m => {
                 const div = document.createElement('div');
                 div.className = 'list-row';
