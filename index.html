@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>记账本 Pro</title>
+    <title>实时记账本 Pro</title>
     <style>
         :root {
             --ios-bg: #F2F2F7;
@@ -111,14 +111,12 @@
             cursor: pointer;
             border-radius: 6px;
         }
-        .delete-btn:active { background-color: #FFE5E5; }
 
         .empty-state {
             text-align: center;
             padding: 30px 20px;
             color: var(--ios-text-secondary);
             font-size: 15px;
-            line-height: 1.5;
         }
 
         #toast {
@@ -131,15 +129,10 @@
             padding: 12px 24px;
             border-radius: 20px;
             font-size: 15px;
-            font-weight: 500;
             z-index: 9999;
             transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            white-space: nowrap;
         }
         #toast.show { top: 40px; }
-        #toast.error { background-color: var(--ios-red); }
-        #toast.success { background-color: #34C759; }
     </style>
 </head>
 <body>
@@ -170,177 +163,126 @@
 
         <div class="section-header">月度统计</div>
         <div class="ios-group" id="monthlyList">
-            <div class="empty-state">等待就绪...</div>
+            <div class="empty-state">同步中...</div>
         </div>
 
         <div class="section-header">历史记录</div>
         <div class="ios-group" id="historyList">
-            <div class="empty-state">正在加载底层组件...</div>
+            <div class="empty-state">正在建立实时连接...</div>
         </div>
     </div>
 
     <script type="module">
-        
-        // 全局报错捕获依然保留
-        window.onerror = function(message, source, lineno, colno, error) {
-            const errorText = message || '未知异常';
-            document.getElementById('toast').innerText = '遇到错误，请看下方提示';
-            document.getElementById('toast').className = 'show error';
-            document.getElementById('historyList').innerHTML = 
-                `<div class="empty-state" style="color:var(--ios-red); text-align:left; word-break:break-all;">
-                    <b>程序崩溃信息：</b><br>${errorText}<br>行号: ${lineno}
-                </div>`;
-            return true;
-        };
-
         const SUPABASE_URL = 'https://htqjfniugsahibhkjszb.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0cWpmbml1Z3NhaGliaGtqc3piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NDI2NDksImV4cCI6MjA4OTIxODY0OX0.pmMUaaLLZ-RWFt_bkFPFiSLmdM4LKbG6SI-q2TEe-j8';
         
         let supabase = null;
         let localData = []; 
-        let toastTimeout;
 
-        // --- 核心突破：多路智能备胎加载引擎 ---
-        async function loadSupabaseEngine() {
-            // 我们不依赖单一节点，准备了三条不同的取件路线
-            const cdnRoutes = [
-                'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',  // 路线 1: 国际大厂
-                'https://esm.sh/@supabase/supabase-js@2',                       // 路线 2: 专线加速
-                'https://unpkg.com/@supabase/supabase-js@2?module'              // 路线 3: 传统备用
+        // --- 1. 多路加速加载底层引擎 ---
+        async function loadEngine() {
+            const urls = [
+                'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
+                'https://esm.sh/@supabase/supabase-js@2'
             ];
-
-            for (const url of cdnRoutes) {
+            for (const url of urls) {
                 try {
-                    // 动态引入：不仅能捕捉网络拦截，还能检查代码有效性
-                    const module = await import(url);
-                    return module.createClient; 
-                } catch (e) {
-                    console.warn(`[节点切换] 节点 ${url} 被拦截，无缝切换下一个...`);
-                }
+                    const mod = await import(url);
+                    return mod.createClient;
+                } catch (e) { console.warn("跳过故障节点"); }
             }
-            // 如果三个全被防火墙屏蔽了，才会抛出最终报错
-            throw new Error("所有加速节点均无法访问");
+            throw new Error("网络环境受限，请尝试切换网络");
         }
 
-        // --- 主启动程序 ---
+        // --- 2. 实时订阅函数 (核心升级) ---
+        function subscribeToChanges() {
+            // 监听 expenses 表的所有变动 (INSERT, DELETE, UPDATE)
+            supabase
+                .channel('realtime-expenses')
+                .on('postgres_changes', { 
+                    event: '*', 
+                    schema: 'public', 
+                    table: 'expenses' 
+                }, (payload) => {
+                    console.log('检测到云端变动:', payload);
+                    // 只要有变动，立刻重新拉取最新数据
+                    fetchCloudData();
+                    
+                    // 如果是别人删除了，给个小提示
+                    if (payload.eventType === 'DELETE') {
+                        showToast('有一条记录被远程删除');
+                    }
+                })
+                .subscribe();
+        }
+
+        // --- 3. 初始化程序 ---
         async function bootstrap() {
             initDateUI();
             try {
-                // 第一步：加载核心引擎
-                const createClient = await loadSupabaseEngine();
-                document.getElementById('historyList').innerHTML = '<div class="empty-state">引擎加载成功，正在同步数据...</div>';
-                
-                // 第二步：连接数据库
+                const createClient = await loadEngine();
                 supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+                
+                // 第一步：拉取现有数据
                 await fetchCloudData();
+                
+                // 第二步：启动实时监听
+                subscribeToChanges();
+                
+                console.log("实时连接已建立");
             } catch (err) {
-                document.getElementById('historyList').innerHTML = 
-                    `<div class="empty-state" style="color:var(--ios-red);"><b>初始化彻底失败</b><br>${err.message}<br>请尝试关闭/开启代理或更换 WiFi</div>`;
-                document.getElementById('monthlyList').innerHTML = '<div class="empty-state">加载中止</div>';
+                document.getElementById('historyList').innerHTML = `<div class="empty-state" style="color:red;">连接失败: ${err.message}</div>`;
             }
         }
-        
-        // 瞬间启动
         bootstrap();
 
-
-        // --- UI 与业务逻辑 ---
-        
-        function showToast(msg, type = 'normal') {
-            const toast = document.getElementById('toast');
-            toast.innerText = msg;
-            toast.className = `show ${type}`;
-            clearTimeout(toastTimeout);
-            toastTimeout = setTimeout(() => { toast.className = ''; }, 3000);
-        }
-
-        function escapeHTML(str) {
-            if (!str) return '';
-            return String(str).replace(/[&<>'"]/g, tag => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
-            }[tag]));
-        }
-
-        function initDateUI() {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            document.getElementById('dateInput').value = `${year}-${month}-${day}`;
-        }
+        // --- 业务功能 ---
 
         async function fetchCloudData() {
-            try {
-                const { data, error } = await supabase
-                    .from('expenses')
-                    .select('*')
-                    .order('date', { ascending: false })
-                    .order('id', { ascending: false });
+            const { data, error } = await supabase
+                .from('expenses')
+                .select('*')
+                .order('date', { ascending: false })
+                .order('id', { ascending: false });
 
-                if (error) throw error;
-                localData = data || []; 
+            if (!error) {
+                localData = data || [];
                 renderUI();
-            } catch (err) {
-                document.getElementById('historyList').innerHTML = `<div class="empty-state" style="color:var(--ios-red);">拉取失败: ${err.message}</div>`;
             }
         }
 
-        document.getElementById('expenseForm').addEventListener('submit', async function(e) {
-            e.preventDefault(); 
-
-            if (!supabase) {
-                showToast('数据库还在连接中，请稍后', 'error');
-                return;
-            }
-
+        document.getElementById('expenseForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
             const date = document.getElementById('dateInput').value;
             const amount = parseFloat(document.getElementById('amountInput').value);
             const desc = document.getElementById('descInput').value.trim();
-            const btn = document.getElementById('submitBtn');
 
             btn.disabled = true;
-            btn.innerText = '正在保存...';
+            btn.innerText = '发送中...';
 
-            try {
-                const { data, error } = await supabase.from('expenses').insert([{ date, amount, desc }]).select(); 
-                if (error) throw error;
-
-                showToast('已保存', 'success');
+            // 仅仅发送请求即可，Realtime 会自动触发 fetchCloudData 刷新 UI
+            const { error } = await supabase.from('expenses').insert([{ date, amount, desc }]);
+            
+            if (!error) {
+                showToast('保存成功', 'success');
                 document.getElementById('amountInput').value = '';
                 document.getElementById('descInput').value = '';
-                
-                if (data && data.length > 0) {
-                    localData.unshift(data[0]); 
-                    localData.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-                    renderUI();
-                } else {
-                    await fetchCloudData();
-                }
-            } catch (err) {
-                showToast('保存失败: ' + err.message, 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerText = '保存记录';
+            } else {
+                showToast('错误: ' + error.message);
             }
+            btn.disabled = false;
+            btn.innerText = '保存记录';
         });
 
-        // 模块作用域下，函数需要挂载到 window 才能在 HTML 中调用
-        window.deleteItem = async function(id) {
-            if (!supabase) return;
-            if (!confirm('确定要删除这条记录吗？')) return;
-            
-            showToast('正在删除...', 'normal');
-            try {
-                const { error } = await supabase.from('expenses').delete().eq('id', id);
-                if (error) throw error;
-                
-                localData = localData.filter(item => item.id !== id);
-                renderUI();
-                showToast('记录已删除', 'success');
-            } catch (err) {
-                showToast('删除失败: ' + err.message, 'error');
-            }
+        window.deleteItem = async (id) => {
+            if (!confirm('确定删除？')) return;
+            showToast('处理中...');
+            // 同样，删除成功后 Realtime 会自动刷新列表
+            await supabase.from('expenses').delete().eq('id', id);
         };
+
+        // --- UI 与工具 ---
 
         function renderUI() {
             const historyList = document.getElementById('historyList');
@@ -349,42 +291,53 @@
             monthlyList.innerHTML = '';
 
             if (localData.length === 0) {
-                historyList.innerHTML = '<div class="empty-state">暂无记账记录</div>';
-                monthlyList.innerHTML = '<div class="empty-state">暂无统计数据</div>';
+                const empty = '<div class="empty-state">暂无数据</div>';
+                historyList.innerHTML = empty;
+                monthlyList.innerHTML = empty;
                 return;
             }
 
             const months = {};
-
             localData.forEach(item => {
-                const safeAmount = Number(item.amount) || 0;
-                const div = document.createElement('div');
-                div.className = 'list-row';
-                div.innerHTML = `
+                const val = Number(item.amount) || 0;
+                const row = document.createElement('div');
+                row.className = 'list-row';
+                row.innerHTML = `
                     <div class="list-info">
                         <span class="list-desc">${escapeHTML(item.desc)}</span>
                         <span class="list-date">${escapeHTML(item.date)}</span>
                     </div>
                     <div class="list-right">
-                        <span class="list-amount">￥${safeAmount.toFixed(2)}</span>
+                        <span class="list-amount">￥${val.toFixed(2)}</span>
                         <button class="delete-btn" onclick="deleteItem('${item.id}')">删除</button>
-                    </div>
-                `;
-                historyList.appendChild(div);
-
+                    </div>`;
+                historyList.appendChild(row);
                 const m = item.date.substring(0, 7);
-                months[m] = (months[m] || 0) + safeAmount;
+                months[m] = (months[m] || 0) + val;
             });
 
             Object.keys(months).sort().reverse().forEach(m => {
-                const div = document.createElement('div');
-                div.className = 'list-row';
-                div.innerHTML = `
-                    <span class="list-desc" style="font-weight:500;">${escapeHTML(m)}</span>
-                    <span class="list-amount text-blue">￥${months[m].toFixed(2)}</span>
-                `;
-                monthlyList.appendChild(div);
+                const row = document.createElement('div');
+                row.className = 'list-row';
+                row.innerHTML = `<span class="list-desc" style="font-weight:500;">${m}</span><span class="list-amount text-blue">￥${months[m].toFixed(2)}</span>`;
+                monthlyList.appendChild(row);
             });
+        }
+
+        function initDateUI() {
+            const d = new Date();
+            document.getElementById('dateInput').value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.className = 'show';
+            setTimeout(() => t.className = '', 2000);
+        }
+
+        function escapeHTML(s) {
+            return String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":"&#39;",'"':"&quot;"}[c]));
         }
     </script>
 </body>
