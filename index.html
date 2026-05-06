@@ -2,8 +2,15 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>实时记账本 Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>记账本 Pro</title>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="记账本">
+    <meta name="theme-color" content="#F2F2F7">
+    <link rel="apple-touch-icon" href="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23007AFF' rx='20'/%3E%3Ctext x='50' y='68' font-size='50' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3E%E8%B4%A6%3C/text%3E%3C/svg%3E">
+
     <style>
         :root {
             --ios-bg: #F2F2F7;
@@ -20,18 +27,43 @@
             background-color: var(--ios-bg);
             color: var(--ios-text-primary);
             margin: 0;
-            padding: 0 0 50px 0;
+            padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0; /* 适配刘海屏 */
             -webkit-font-smoothing: antialiased;
         }
 
-        .container { max-width: 500px; margin: 0 auto; }
+        .container { max-width: 500px; margin: 0 auto; padding-bottom: 40px; }
+
+        /* 顶部标题区域设计 */
+        .header-area {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 20px 16px 10px;
+        }
 
         .large-title {
             font-size: 34px;
             font-weight: 700;
             letter-spacing: 0.41px;
-            margin: 30px 16px 10px;
+            margin: 0;
         }
+
+        /* 安装到桌面按钮 */
+        .install-btn {
+            background-color: rgba(0, 122, 255, 0.1);
+            color: var(--ios-blue);
+            border: none;
+            border-radius: 16px;
+            padding: 6px 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .install-btn:active { opacity: 0.7; }
+        .install-btn svg { width: 16px; height: 16px; fill: currentColor; }
 
         .section-header {
             font-size: 13px;
@@ -119,18 +151,41 @@
             font-size: 15px;
         }
 
+        /* 引导安装的弹窗遮罩 */
+        #installGuide {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 10000;
+            justify-content: center;
+            align-items: flex-end;
+            padding: 20px;
+        }
+        .guide-box {
+            background: white;
+            border-radius: 20px;
+            padding: 24px;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+            margin-bottom: 30px; /* 留出底部空间 */
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            position: relative;
+            animation: slideUp 0.3s ease-out;
+        }
+        .guide-box::after {
+            content: ''; position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
+            border-width: 10px 10px 0; border-style: solid; border-color: white transparent transparent transparent;
+        }
+        @keyframes slideUp { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
         #toast {
             position: fixed;
-            top: -100px;
-            left: 50%;
-            transform: translateX(-50%);
-            background-color: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 20px;
-            font-size: 15px;
-            z-index: 9999;
-            transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            top: -100px; left: 50%; transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.8); color: white;
+            padding: 12px 24px; border-radius: 20px; font-size: 15px;
+            z-index: 9999; transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
         #toast.show { top: 40px; }
     </style>
@@ -139,8 +194,27 @@
 
     <div id="toast"></div>
 
+    <div id="installGuide" onclick="this.style.display='none'">
+        <div class="guide-box">
+            <h3 style="margin-top:0;">安装到手机桌面</h3>
+            <p style="color:#666; font-size: 15px; line-height: 1.5;">
+                1. 点击屏幕底部正中间的 <b>分享图标</b><br>
+                <span style="font-size:24px;">⍐</span><br>
+                2. 向上滑动菜单，选择 <b>「添加到主屏幕」</b><br>
+                3. 点击右上角的 <b>「添加」</b>
+            </p>
+            <button style="margin-top:10px; padding:10px 20px; border-radius:10px; border:none; background:#eee; font-weight:bold;" onclick="document.getElementById('installGuide').style.display='none'">我知道了</button>
+        </div>
+    </div>
+
     <div class="container">
-        <h1 class="large-title">记账本</h1>
+        <div class="header-area">
+            <h1 class="large-title">记账本</h1>
+            <button class="install-btn" id="installBtn" onclick="triggerInstall()">
+                <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                装到桌面
+            </button>
+        </div>
 
         <div class="section-header">记一笔</div>
         <form id="expenseForm">
@@ -173,13 +247,51 @@
     </div>
 
     <script type="module">
+        // ==================
+        // 安装到桌面逻辑 (PWA)
+        // ==================
+        let deferredPrompt;
+
+        // 监听安卓系统的安装事件
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+        });
+
+        // 隐藏如果是已经从桌面打开的，就不显示“安装按钮”了
+        if (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
+            document.getElementById('installBtn').style.display = 'none';
+        }
+
+        window.triggerInstall = async () => {
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            
+            if (isIOS) {
+                // 苹果手机：弹出图文引导
+                document.getElementById('installGuide').style.display = 'flex';
+            } else if (deferredPrompt) {
+                // 安卓手机：直接调起系统安装弹窗
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    document.getElementById('installBtn').style.display = 'none';
+                }
+                deferredPrompt = null;
+            } else {
+                // 其他情况兜底提示
+                showToast("请点击浏览器菜单中的「添加到主屏幕」");
+            }
+        };
+
+        // ==================
+        // 数据库与业务逻辑 (完美继承上一版的实时监听功能)
+        // ==================
         const SUPABASE_URL = 'https://htqjfniugsahibhkjszb.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0cWpmbml1Z3NhaGliaGtqc3piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NDI2NDksImV4cCI6MjA4OTIxODY0OX0.pmMUaaLLZ-RWFt_bkFPFiSLmdM4LKbG6SI-q2TEe-j8';
         
         let supabase = null;
         let localData = []; 
 
-        // --- 1. 多路加速加载底层引擎 ---
         async function loadEngine() {
             const urls = [
                 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
@@ -194,49 +306,28 @@
             throw new Error("网络环境受限，请尝试切换网络");
         }
 
-        // --- 2. 实时订阅函数 (核心升级) ---
         function subscribeToChanges() {
-            // 监听 expenses 表的所有变动 (INSERT, DELETE, UPDATE)
             supabase
                 .channel('realtime-expenses')
-                .on('postgres_changes', { 
-                    event: '*', 
-                    schema: 'public', 
-                    table: 'expenses' 
-                }, (payload) => {
-                    console.log('检测到云端变动:', payload);
-                    // 只要有变动，立刻重新拉取最新数据
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, (payload) => {
                     fetchCloudData();
-                    
-                    // 如果是别人删除了，给个小提示
-                    if (payload.eventType === 'DELETE') {
-                        showToast('有一条记录被远程删除');
-                    }
+                    if (payload.eventType === 'DELETE') showToast('有一条记录被远程删除');
                 })
                 .subscribe();
         }
 
-        // --- 3. 初始化程序 ---
         async function bootstrap() {
             initDateUI();
             try {
                 const createClient = await loadEngine();
                 supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-                
-                // 第一步：拉取现有数据
                 await fetchCloudData();
-                
-                // 第二步：启动实时监听
                 subscribeToChanges();
-                
-                console.log("实时连接已建立");
             } catch (err) {
                 document.getElementById('historyList').innerHTML = `<div class="empty-state" style="color:red;">连接失败: ${err.message}</div>`;
             }
         }
         bootstrap();
-
-        // --- 业务功能 ---
 
         async function fetchCloudData() {
             const { data, error } = await supabase
@@ -261,7 +352,6 @@
             btn.disabled = true;
             btn.innerText = '发送中...';
 
-            // 仅仅发送请求即可，Realtime 会自动触发 fetchCloudData 刷新 UI
             const { error } = await supabase.from('expenses').insert([{ date, amount, desc }]);
             
             if (!error) {
@@ -278,11 +368,8 @@
         window.deleteItem = async (id) => {
             if (!confirm('确定删除？')) return;
             showToast('处理中...');
-            // 同样，删除成功后 Realtime 会自动刷新列表
             await supabase.from('expenses').delete().eq('id', id);
         };
-
-        // --- UI 与工具 ---
 
         function renderUI() {
             const historyList = document.getElementById('historyList');
