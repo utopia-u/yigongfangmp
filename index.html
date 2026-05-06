@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>记账本 Pro</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
+    <script 
+        src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.min.js" 
+        onerror="document.getElementById('historyList').innerHTML='<div class=\'empty-state\' style=\'color:red;\'>数据库文件下载失败，请检查网络或开启代理</div>'">
+    </script>
     <style>
         :root {
             --ios-bg: #F2F2F7;
@@ -171,20 +174,29 @@
 
         <div class="section-header">月度统计</div>
         <div class="ios-group" id="monthlyList">
-            <div class="empty-state">连接数据库中...</div>
+            <div class="empty-state">等待连接...</div>
         </div>
 
         <div class="section-header">历史记录</div>
         <div class="ios-group" id="historyList">
-            <div class="empty-state">连接数据库中...</div>
+            <div class="empty-state">等待连接...</div>
         </div>
     </div>
 
     <script>
-        // --- 全局防死锁拦截 ---
-        window.onerror = function(message) {
-            console.error("系统错误:", message);
-            showToast('脚本执行出错', 'error');
+        // --- 终极修复2：精确捕捉报错信息并展示在页面上 ---
+        window.onerror = function(message, source, lineno, colno, error) {
+            const errorText = message || '未知异常';
+            document.getElementById('toast').innerText = '遇到错误，请看下方提示';
+            document.getElementById('toast').className = 'show error';
+            
+            // 把具体的报错代码直接写在屏幕上！
+            document.getElementById('historyList').innerHTML = 
+                `<div class="empty-state" style="color:var(--ios-red); text-align:left; word-break:break-all;">
+                    <b>程序崩溃信息：</b><br>
+                    ${errorText}<br>
+                    行号: ${lineno}
+                </div>`;
             return true;
         };
 
@@ -212,7 +224,7 @@
             }[tag]));
         }
 
-        // 核心修复2：无论网络如何，第一秒立刻初始化页面内容
+        // 初始化日期
         function initUI() {
             const now = new Date();
             const year = now.getFullYear();
@@ -220,25 +232,26 @@
             const day = String(now.getDate()).padStart(2, '0');
             document.getElementById('dateInput').value = `${year}-${month}-${day}`;
         }
-        initUI(); // 立刻执行！不需要等 window.onload
+        initUI(); 
 
-        // 核心修复3：轮询等待云端组件加载 (最多等10秒)
+        // 核心启动器
         let checkCount = 0;
         const initSupabase = setInterval(async () => {
             checkCount++;
             
-            // 如果组件加载成功了
+            // 检查 Supabase 是否加载完成
             if (typeof window.supabase !== 'undefined') {
                 clearInterval(initSupabase);
+                document.getElementById('historyList').innerHTML = '<div class="empty-state">正在同步数据...</div>';
+                
+                // 初始化客户端
                 supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
                 await fetchCloudData();
             } 
-            // 如果等了 10 秒（20次 * 0.5秒）还没加载出来，说明网络彻底墙了
-            else if (checkCount > 20) {
+            else if (checkCount > 15) { // 约 7.5 秒超时
                 clearInterval(initSupabase);
-                showToast('网络连接失败', 'error');
-                document.getElementById('historyList').innerHTML = '<div class="empty-state" style="color:var(--ios-red);">数据库组件加载超时<br>请尝试切换 WiFi、开启代理或刷新页面</div>';
-                document.getElementById('monthlyList').innerHTML = '<div class="empty-state">连接失败</div>';
+                document.getElementById('historyList').innerHTML = 
+                    '<div class="empty-state" style="color:var(--ios-red);">数据库组件加载超时<br>大概率是被网络拦截了</div>';
             }
         }, 500);
 
@@ -256,7 +269,7 @@
                 renderUI();
             } catch (err) {
                 console.error("拉取数据失败:", err);
-                document.getElementById('historyList').innerHTML = `<div class="empty-state">拉取失败: ${err.message}</div>`;
+                document.getElementById('historyList').innerHTML = `<div class="empty-state" style="color:red;">拉取失败: ${err.message}</div>`;
             }
         }
 
@@ -264,7 +277,7 @@
             e.preventDefault(); 
 
             if (!supabase) {
-                showToast('数据库还在连接中，请稍后', 'error');
+                showToast('数据库未就绪', 'error');
                 return;
             }
 
@@ -312,7 +325,7 @@
                 renderUI();
                 showToast('记录已删除', 'success');
             } catch (err) {
-                showToast('删除失败', 'error');
+                showToast('删除失败: ' + err.message, 'error');
             }
         };
 
