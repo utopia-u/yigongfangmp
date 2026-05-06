@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>记账</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <title>记账本 Pro</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <style>
-        /* iOS 颜色变量 */
         :root {
             --ios-bg: #F2F2F7;
             --ios-card: #FFFFFF;
@@ -18,12 +17,11 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
             background-color: var(--ios-bg);
             color: var(--ios-text-primary);
             margin: 0;
-            padding: 0;
-            padding-bottom: 40px;
+            padding: 0 0 50px 0;
             -webkit-font-smoothing: antialiased;
         }
 
@@ -35,17 +33,6 @@
             letter-spacing: 0.41px;
             margin: 30px 16px 10px;
         }
-
-        #status {
-            text-align: center;
-            font-size: 13px;
-            height: 18px;
-            margin-top: 10px;
-            transition: color 0.3s;
-        }
-        .status-normal { color: var(--ios-text-secondary); }
-        .status-error { color: var(--ios-red); font-weight: 500; }
-        .status-success { color: #34C759; font-weight: 500; }
 
         .section-header {
             font-size: 13px;
@@ -78,6 +65,7 @@
             padding: 12px 0;
             background: transparent;
             color: var(--ios-text-primary);
+            width: 100%;
         }
         .input-row input::placeholder { color: #C7C7CC; }
 
@@ -93,6 +81,7 @@
             font-weight: 600;
             padding: 14px;
             cursor: pointer;
+            transition: opacity 0.2s;
         }
         .submit-btn:active { opacity: 0.7; }
         .submit-btn:disabled { background-color: #A1C9F7; cursor: not-allowed; }
@@ -107,8 +96,8 @@
         }
         .list-row:last-child { border-bottom: none; }
         
-        .list-info { display: flex; flex-direction: column; gap: 4px; }
-        .list-desc { font-size: 17px; font-weight: 400; word-break: break-all; } 
+        .list-info { display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+        .list-desc { font-size: 17px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } 
         .list-date { font-size: 13px; color: var(--ios-text-secondary); }
         .list-right { display: flex; align-items: center; gap: 15px; flex-shrink: 0; }
         .list-amount { font-size: 17px; font-weight: 500; }
@@ -119,95 +108,145 @@
             background: none;
             border: none;
             font-size: 15px;
-            padding: 4px 8px;
+            padding: 6px 10px;
             cursor: pointer;
+            border-radius: 6px;
         }
+        .delete-btn:active { background-color: #FFE5E5; }
 
         .empty-state {
             text-align: center;
-            padding: 20px;
+            padding: 30px 20px;
             color: var(--ios-text-secondary);
             font-size: 15px;
         }
+
+        /* 全新设计的 Toast 弹窗 */
+        #toast {
+            position: fixed;
+            top: -100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 20px;
+            font-size: 15px;
+            font-weight: 500;
+            z-index: 9999;
+            transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            white-space: nowrap;
+        }
+        #toast.show { top: 40px; }
+        #toast.error { background-color: var(--ios-red); }
+        #toast.success { background-color: #34C759; }
     </style>
 </head>
 <body>
 
+    <div id="toast"></div>
+
     <div class="container">
-        <div id="status" class="status-normal"></div>
         <h1 class="large-title">记账本</h1>
 
         <div class="section-header">记一笔</div>
-        <div class="ios-group">
-            <div class="input-row">
-                <label for="dateInput">日期</label>
-                <input type="date" id="dateInput">
+        <form id="expenseForm">
+            <div class="ios-group">
+                <div class="input-row">
+                    <label for="dateInput">日期</label>
+                    <input type="date" id="dateInput" required>
+                </div>
+                <div class="input-row">
+                    <label for="amountInput">金额</label>
+                    <input type="number" id="amountInput" placeholder="0.00" step="0.01" min="0.01" required>
+                </div>
+                <div class="input-row">
+                    <label for="descInput">备注</label>
+                    <input type="text" id="descInput" placeholder="例如：午餐、交通" maxlength="50" required>
+                </div>
             </div>
-            <div class="input-row">
-                <label for="amountInput">金额</label>
-                <input type="number" id="amountInput" placeholder="0.00" step="0.01" min="0.01">
-            </div>
-            <div class="input-row">
-                <label for="descInput">备注</label>
-                <input type="text" id="descInput" placeholder="例如：午餐、交通" maxlength="50">
-            </div>
-        </div>
-        <button id="addBtn" class="submit-btn" onclick="addRecord()">保存</button>
+            <button type="submit" id="submitBtn" class="submit-btn">保存记录</button>
+        </form>
 
         <div class="section-header">月度统计</div>
-        <div class="ios-group" id="monthlyList"></div>
+        <div class="ios-group" id="monthlyList">
+            <div class="empty-state">加载中...</div>
+        </div>
 
         <div class="section-header">历史记录</div>
-        <div class="ios-group" id="historyList"></div>
+        <div class="ios-group" id="historyList">
+            <div class="empty-state">加载中...</div>
+        </div>
     </div>
 
     <script>
-        // 你的 Supabase 密钥
+        // --- 1. 全局防死锁拦截器 ---
+        // 任何导致代码崩溃的隐性错误，都会直接弹窗显示！
+        window.onerror = function(message, source, lineno, colno, error) {
+            alert('代码发生底层错误:\n' + message + '\n请检查网络或刷新页面');
+            const btn = document.getElementById('submitBtn');
+            if(btn) { btn.disabled = false; btn.innerText = '保存记录'; }
+            return true;
+        };
+
+        // --- 2. 数据库配置 ---
         const SUPABASE_URL = 'https://htqjfniugsahibhkjszb.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0cWpmbml1Z3NhaGliaGtqc3piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NDI2NDksImV4cCI6MjA4OTIxODY0OX0.pmMUaaLLZ-RWFt_bkFPFiSLmdM4LKbG6SI-q2TEe-j8';
-
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        
+        let supabase = null;
         let localData = []; 
 
-        // XSS 防御：HTML 转义函数
+        // --- 3. 核心工具函数 ---
+        // 漂亮的消息提示框
+        let toastTimeout;
+        function showToast(msg, type = 'normal') {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.className = `show ${type}`;
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.className = '';
+            }, 3000);
+        }
+
+        // XSS 字符转义
         function escapeHTML(str) {
             if (!str) return '';
             return String(str).replace(/[&<>'"]/g, tag => ({
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                "'": '&#39;',
-                '"': '&quot;'
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
             }[tag]));
         }
 
-        // 获取当前当地时间
-        function getLocalDateString() {
+        // 初始化日期为今天
+        function initDate() {
             const now = new Date();
             const year = now.getFullYear();
             const month = String(now.getMonth() + 1).padStart(2, '0');
             const day = String(now.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
+            document.getElementById('dateInput').value = `${year}-${month}-${day}`;
         }
 
-        window.onload = () => {
-            document.getElementById('dateInput').value = getLocalDateString();
-            loadData(); 
+        // --- 4. 核心业务逻辑 ---
+        
+        // 页面加载完毕后执行
+        window.onload = async () => {
+            initDate();
+            
+            // 检查 Supabase 库是否被网络拦截
+            if (typeof window.supabase === 'undefined') {
+                showToast('无法连接到数据库服务器(CDN被拦截)', 'error');
+                document.getElementById('historyList').innerHTML = '<div class="empty-state">网络错误，组件未加载</div>';
+                return;
+            }
+
+            // 初始化客户端
+            supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+            await fetchCloudData();
         };
 
-        // 状态提示器
-        function setStatus(msg, type = 'normal') {
-            const statusEl = document.getElementById('status');
-            statusEl.innerText = msg;
-            statusEl.className = `status-${type}`;
-            if(msg) {
-                setTimeout(() => { statusEl.innerText = ''; }, 3000);
-            }
-        }
-
-        // 加载数据
-        async function loadData() {
-            setStatus('正在同步云端数据...', 'normal');
+        // 拉取云端数据
+        async function fetchCloudData() {
             try {
                 const { data, error } = await supabase
                     .from('expenses')
@@ -216,109 +255,105 @@
                     .order('id', { ascending: false });
 
                 if (error) throw error;
-                
                 localData = data || []; 
-                render(localData);
-                setStatus('同步成功', 'success');
+                renderUI();
             } catch (err) {
-                console.error("Load Error:", err);
-                setStatus('加载失败，请检查网络或配置', 'error');
+                console.error("拉取数据失败:", err);
+                showToast('读取数据失败: ' + err.message, 'error');
+                document.getElementById('historyList').innerHTML = '<div class="empty-state">数据加载失败</div>';
             }
         }
 
-        // 优化后的添加记录函数（防止静默失败）
-        async function addRecord() {
+        // 表单提交事件 (取代原本的 onclick)
+        document.getElementById('expenseForm').addEventListener('submit', async function(e) {
+            e.preventDefault(); // 阻止网页默认的刷新提交行为
+
+            if (!supabase) {
+                showToast('数据库未初始化，无法保存', 'error');
+                return;
+            }
+
+            // 获取数据
             const date = document.getElementById('dateInput').value;
-            const amountInputStr = document.getElementById('amountInput').value;
-            const amount = parseFloat(amountInputStr);
-            const desc = document.getElementById('descInput').value.trim() || '日常支出';
+            const amount = parseFloat(document.getElementById('amountInput').value);
+            const desc = document.getElementById('descInput').value.trim();
+            const btn = document.getElementById('submitBtn');
 
-            if (!date) {
-                alert('请选择日期'); 
-                return;
-            }
-            if (isNaN(amount) || amount <= 0) {
-                alert('请输入大于 0 的有效金额'); 
-                return;
-            }
-
-            const btn = document.getElementById('addBtn');
+            // 锁定按钮状态
             btn.disabled = true;
-            setStatus('保存中...', 'normal');
+            btn.innerText = '正在保存...';
 
             try {
-                console.log("正在向 Supabase 发送数据:", { date, amount, desc });
-
+                // 写入数据库
                 const { data, error } = await supabase
                     .from('expenses')
                     .insert([{ date, amount, desc }])
-                    .select(); 
-
-                console.log("Supabase 返回结果:", { data, error });
+                    .select(); // 要求返回刚插入的数据
 
                 if (error) throw error;
 
-                // 只要没有报错，就清空输入框并提示成功
+                // 成功后的处理
+                showToast('记录已保存', 'success');
                 document.getElementById('amountInput').value = '';
                 document.getElementById('descInput').value = '';
-                setStatus('已保存', 'success');
+                document.getElementById('amountInput').focus(); // 自动聚焦，方便连续记账
 
-                // 处理 Supabase RLS 权限拦截返回空数组的情况
+                // 刷新列表 (如果有返回值就直接插进去，如果没有就重新拉取)
                 if (data && data.length > 0) {
                     localData.unshift(data[0]); 
                     localData.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-                    render(localData);
+                    renderUI();
                 } else {
-                    console.warn("插入成功但未返回数据，可能是 RLS 策略限制。正在重新拉取...");
-                    await loadData(); 
+                    await fetchCloudData();
                 }
 
             } catch (err) {
-                console.error("Save Error:", err);
-                alert('保存失败: ' + err.message);
-                setStatus('保存失败', 'error');
+                console.error("保存失败:", err);
+                showToast('保存失败: ' + err.message, 'error');
             } finally {
+                // 无论成功还是失败，必须解锁按钮
                 btn.disabled = false;
+                btn.innerText = '保存记录';
             }
-        }
+        });
 
         // 删除记录
-        async function deleteItem(id) {
+        window.deleteItem = async function(id) {
             if (!confirm('确定要删除这条记录吗？')) return;
             
-            setStatus('删除中...', 'normal');
+            showToast('正在删除...', 'normal');
             try {
                 const { error } = await supabase.from('expenses').delete().eq('id', id);
                 if (error) throw error;
                 
                 localData = localData.filter(item => item.id !== id);
-                render(localData);
-                setStatus('已删除', 'success');
+                renderUI();
+                showToast('记录已删除', 'success');
             } catch (err) {
-                console.error("Delete Error:", err);
-                alert('删除失败');
-                setStatus('删除失败', 'error');
+                console.error("删除失败:", err);
+                showToast('删除失败: ' + err.message, 'error');
             }
-        }
+        };
 
-        // 渲染引擎
-        function render(data) {
+        // --- 5. 页面渲染引擎 ---
+        function renderUI() {
             const historyList = document.getElementById('historyList');
             const monthlyList = document.getElementById('monthlyList');
             historyList.innerHTML = '';
             monthlyList.innerHTML = '';
 
-            if (data.length === 0) {
-                historyList.innerHTML = '<div class="empty-state">暂无记录</div>';
-                monthlyList.innerHTML = '<div class="empty-state">暂无数据</div>';
+            if (localData.length === 0) {
+                historyList.innerHTML = '<div class="empty-state">暂无记账记录</div>';
+                monthlyList.innerHTML = '<div class="empty-state">暂无统计数据</div>';
                 return;
             }
 
             const months = {};
 
-            data.forEach(item => {
+            localData.forEach(item => {
                 const safeAmount = Number(item.amount) || 0;
 
+                // 渲染单条历史
                 const div = document.createElement('div');
                 div.className = 'list-row';
                 div.innerHTML = `
@@ -333,10 +368,12 @@
                 `;
                 historyList.appendChild(div);
 
+                // 统计月度
                 const m = item.date.substring(0, 7);
                 months[m] = (months[m] || 0) + safeAmount;
             });
 
+            // 渲染月度
             Object.keys(months).sort().reverse().forEach(m => {
                 const div = document.createElement('div');
                 div.className = 'list-row';
