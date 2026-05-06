@@ -69,7 +69,6 @@
             min-height: 44px;
         }
         .input-row:last-child { border-bottom: none; }
-        /* 增加 label 的点击响应区域 */
         .input-row label { width: 80px; font-size: 17px; cursor: pointer; }
         .input-row input {
             flex: 1;
@@ -109,7 +108,7 @@
         .list-row:last-child { border-bottom: none; }
         
         .list-info { display: flex; flex-direction: column; gap: 4px; }
-        .list-desc { font-size: 17px; font-weight: 400; word-break: break-all; } /* 防止长串字符撑破布局 */
+        .list-desc { font-size: 17px; font-weight: 400; word-break: break-all; } 
         .list-date { font-size: 13px; color: var(--ios-text-secondary); }
         .list-right { display: flex; align-items: center; gap: 15px; flex-shrink: 0; }
         .list-amount { font-size: 17px; font-weight: 500; }
@@ -163,14 +162,14 @@
     </div>
 
     <script>
-        // 注意：请务必在 Supabase 后台中为 expenses 表配置 Row Level Security (RLS)！
+        // 你的 Supabase 密钥
         const SUPABASE_URL = 'https://htqjfniugsahibhkjszb.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0cWpmbml1Z3NhaGliaGtqc3piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NDI2NDksImV4cCI6MjA4OTIxODY0OX0.pmMUaaLLZ-RWFt_bkFPFiSLmdM4LKbG6SI-q2TEe-j8';
 
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         let localData = []; 
 
-        // XSS 防御：HTML 转义函数 (核心修复)
+        // XSS 防御：HTML 转义函数
         function escapeHTML(str) {
             if (!str) return '';
             return String(str).replace(/[&<>'"]/g, tag => ({
@@ -182,7 +181,7 @@
             }[tag]));
         }
 
-        // 安全地获取当前当地时间 YYYY-MM-DD
+        // 获取当前当地时间
         function getLocalDateString() {
             const now = new Date();
             const year = now.getFullYear();
@@ -227,20 +226,19 @@
             }
         }
 
-        // 添加记录
+        // 优化后的添加记录函数（防止静默失败）
         async function addRecord() {
             const date = document.getElementById('dateInput').value;
             const amountInputStr = document.getElementById('amountInput').value;
             const amount = parseFloat(amountInputStr);
-            // 去除首尾空格
             const desc = document.getElementById('descInput').value.trim() || '日常支出';
 
             if (!date) {
-                setStatus('请选择日期', 'error');
+                alert('请选择日期'); 
                 return;
             }
             if (isNaN(amount) || amount <= 0) {
-                setStatus('请输入有效金额', 'error');
+                alert('请输入大于 0 的有效金额'); 
                 return;
             }
 
@@ -249,23 +247,32 @@
             setStatus('保存中...', 'normal');
 
             try {
+                console.log("正在向 Supabase 发送数据:", { date, amount, desc });
+
                 const { data, error } = await supabase
                     .from('expenses')
                     .insert([{ date, amount, desc }])
                     .select(); 
 
+                console.log("Supabase 返回结果:", { data, error });
+
                 if (error) throw error;
 
+                // 只要没有报错，就清空输入框并提示成功
+                document.getElementById('amountInput').value = '';
+                document.getElementById('descInput').value = '';
+                setStatus('已保存', 'success');
+
+                // 处理 Supabase RLS 权限拦截返回空数组的情况
                 if (data && data.length > 0) {
-                    document.getElementById('amountInput').value = '';
-                    document.getElementById('descInput').value = '';
-                    
                     localData.unshift(data[0]); 
                     localData.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
                     render(localData);
-                    
-                    setStatus('已保存', 'success');
+                } else {
+                    console.warn("插入成功但未返回数据，可能是 RLS 策略限制。正在重新拉取...");
+                    await loadData(); 
                 }
+
             } catch (err) {
                 console.error("Save Error:", err);
                 alert('保存失败: ' + err.message);
@@ -314,7 +321,6 @@
 
                 const div = document.createElement('div');
                 div.className = 'list-row';
-                // 使用 escapeHTML 对用户可能输入的字符进行彻底转义
                 div.innerHTML = `
                     <div class="list-info">
                         <span class="list-desc">${escapeHTML(item.desc)}</span>
