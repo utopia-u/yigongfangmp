@@ -27,13 +27,12 @@
             background-color: var(--ios-bg);
             color: var(--ios-text-primary);
             margin: 0;
-            padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0; /* 适配刘海屏 */
+            padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0; 
             -webkit-font-smoothing: antialiased;
         }
 
         .container { max-width: 500px; margin: 0 auto; padding-bottom: 40px; }
 
-        /* 顶部标题区域设计 */
         .header-area {
             display: flex;
             justify-content: space-between;
@@ -48,7 +47,6 @@
             margin: 0;
         }
 
-        /* 安装到桌面按钮 */
         .install-btn {
             background-color: rgba(0, 122, 255, 0.1);
             color: var(--ios-blue);
@@ -61,8 +59,11 @@
             display: flex;
             align-items: center;
             gap: 4px;
+            /* 按钮点击防重绘优化 */
+            transition: transform 0.1s, opacity 0.2s;
+            will-change: transform;
         }
-        .install-btn:active { opacity: 0.7; }
+        .install-btn:active { opacity: 0.7; transform: scale(0.96); }
         .install-btn svg { width: 16px; height: 16px; fill: currentColor; }
 
         .section-header {
@@ -77,6 +78,8 @@
             border-radius: 10px;
             margin: 0 16px;
             overflow: hidden;
+            /* 解决 iOS 滚动时的细微卡顿 */
+            -webkit-overflow-scrolling: touch; 
         }
 
         .input-row {
@@ -112,10 +115,10 @@
             font-weight: 600;
             padding: 14px;
             cursor: pointer;
-            transition: opacity 0.2s;
+            transition: opacity 0.2s, background-color 0.2s, transform 0.1s;
         }
-        .submit-btn:active { opacity: 0.7; }
-        .submit-btn:disabled { background-color: #A1C9F7; cursor: not-allowed; }
+        .submit-btn:active { opacity: 0.8; transform: scale(0.98); }
+        .submit-btn:disabled { background-color: #A1C9F7; cursor: not-allowed; opacity: 1; transform: scale(1); }
 
         .list-row {
             display: flex;
@@ -151,9 +154,35 @@
             font-size: 15px;
         }
 
-        /* 引导安装的弹窗遮罩 */
+        /* ========================================= */
+        /* 60帧动画核心优化区域（硬件加速）          */
+        /* ========================================= */
+        
+        /* 1. 全局 Toast 提示框优化 */
+        #toast {
+            position: fixed;
+            top: 0; left: 50%; /* 取消直接用 top 动画 */
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 20px;
+            font-size: 15px;
+            z-index: 9999;
+            /* 开启 GPU 加速，translate3d 避免触发重排 */
+            transform: translate3d(-50%, -100px, 0); 
+            opacity: 0;
+            pointer-events: none; /* 防止遮挡点击 */
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s ease;
+            will-change: transform, opacity; /* 提前分配显存资源 */
+        }
+        #toast.show { 
+            transform: translate3d(-50%, 40px, 0); 
+            opacity: 1;
+        }
+
+        /* 2. 安装引导遮罩背景优化 */
         #installGuide {
-            display: none;
+            display: flex; /* 不再使用 display:none 切换 */
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.6);
@@ -161,7 +190,18 @@
             justify-content: center;
             align-items: flex-end;
             padding: 20px;
+            /* 渐隐渐现，脱离 document 流 */
+            opacity: 0;
+            pointer-events: none; 
+            transition: opacity 0.3s ease-out;
+            will-change: opacity;
         }
+        #installGuide.show {
+            opacity: 1;
+            pointer-events: auto; /* 显示时恢复点击能力 */
+        }
+
+        /* 3. 安装引导弹窗盒子优化 */
         .guide-box {
             background: white;
             border-radius: 20px;
@@ -169,33 +209,29 @@
             width: 100%;
             max-width: 400px;
             text-align: center;
-            margin-bottom: 30px; /* 留出底部空间 */
+            margin-bottom: 30px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             position: relative;
-            animation: slideUp 0.3s ease-out;
+            /* 弹窗从底部滑出，利用 3D 加速 */
+            transform: translate3d(0, 100%, 0);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1);
+            will-change: transform;
+        }
+        #installGuide.show .guide-box {
+            transform: translate3d(0, 0, 0);
         }
         .guide-box::after {
-            content: ''; position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
+            content: ''; position: absolute; bottom: -10px; left: 50%; transform: translate3d(-50%, 0, 0);
             border-width: 10px 10px 0; border-style: solid; border-color: white transparent transparent transparent;
         }
-        @keyframes slideUp { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
-        #toast {
-            position: fixed;
-            top: -100px; left: 50%; transform: translateX(-50%);
-            background-color: rgba(0, 0, 0, 0.8); color: white;
-            padding: 12px 24px; border-radius: 20px; font-size: 15px;
-            z-index: 9999; transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-        #toast.show { top: 40px; }
     </style>
 </head>
 <body>
 
     <div id="toast"></div>
 
-    <div id="installGuide" onclick="this.style.display='none'">
-        <div class="guide-box">
+    <div id="installGuide" onclick="document.getElementById('installGuide').classList.remove('show')">
+        <div class="guide-box" onclick="event.stopPropagation() /* 防止点击内部时关闭弹窗 */">
             <h3 style="margin-top:0;">安装到手机桌面</h3>
             <p style="color:#666; font-size: 15px; line-height: 1.5;">
                 1. 点击屏幕底部正中间的 <b>分享图标</b><br>
@@ -203,7 +239,7 @@
                 2. 向上滑动菜单，选择 <b>「添加到主屏幕」</b><br>
                 3. 点击右上角的 <b>「添加」</b>
             </p>
-            <button style="margin-top:10px; padding:10px 20px; border-radius:10px; border:none; background:#eee; font-weight:bold;" onclick="document.getElementById('installGuide').style.display='none'">我知道了</button>
+            <button style="margin-top:10px; padding:10px 20px; border-radius:10px; border:none; background:#eee; font-weight:bold;" onclick="document.getElementById('installGuide').classList.remove('show')">我知道了</button>
         </div>
     </div>
 
@@ -252,13 +288,11 @@
         // ==================
         let deferredPrompt;
 
-        // 监听安卓系统的安装事件
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
             deferredPrompt = e;
         });
 
-        // 隐藏如果是已经从桌面打开的，就不显示“安装按钮”了
         if (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
             document.getElementById('installBtn').style.display = 'none';
         }
@@ -267,10 +301,9 @@
             const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
             
             if (isIOS) {
-                // 苹果手机：弹出图文引导
-                document.getElementById('installGuide').style.display = 'flex';
+                // 使用 class 添加的方式触发 60fps 动画，拒绝改写 inline style
+                document.getElementById('installGuide').classList.add('show');
             } else if (deferredPrompt) {
-                // 安卓手机：直接调起系统安装弹窗
                 deferredPrompt.prompt();
                 const { outcome } = await deferredPrompt.userChoice;
                 if (outcome === 'accepted') {
@@ -278,13 +311,12 @@
                 }
                 deferredPrompt = null;
             } else {
-                // 其他情况兜底提示
                 showToast("请点击浏览器菜单中的「添加到主屏幕」");
             }
         };
 
         // ==================
-        // 数据库与业务逻辑 (完美继承上一版的实时监听功能)
+        // 数据库与业务逻辑
         // ==================
         const SUPABASE_URL = 'https://htqjfniugsahibhkjszb.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0cWpmbml1Z3NhaGliaGtqc3piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NDI2NDksImV4cCI6MjA4OTIxODY0OX0.pmMUaaLLZ-RWFt_bkFPFiSLmdM4LKbG6SI-q2TEe-j8';
@@ -419,8 +451,8 @@
         function showToast(msg) {
             const t = document.getElementById('toast');
             t.innerText = msg;
-            t.className = 'show';
-            setTimeout(() => t.className = '', 2000);
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2000);
         }
 
         function escapeHTML(s) {
